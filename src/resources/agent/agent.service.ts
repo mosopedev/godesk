@@ -128,7 +128,7 @@ Always! output the specified json format only, no further text is required!!!
       logger(business, agent)
 
 
-      if (!agent || business) {
+      if (!agent || !business) {
         twiml.say("Invalid Phone Number. No business with phone number found.");
         twiml.hangup();
       }
