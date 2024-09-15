@@ -35,6 +35,7 @@ class AgentController implements IController {
     this.router.post(`${this.path}/create`, authenticatedMiddleware, validationMiddleware(validation.createAgent), this.createAgent)
     this.router.post(`${this.path}/call/accept`, this.acceptPhoneCall);
     this.router.post(`${this.path}/call/analyze`, this.analyzeCallIntent);
+    this.router.post(`${this.path}/call/responder`, this.callActionResponder);
     this.router.get( `${this.path}/phones/:country`, authenticatedMiddleware, this.getAvailableNumbers );
     this.router.post(
       `${this.path}/phones/buy`,
@@ -81,7 +82,7 @@ class AgentController implements IController {
   ): Promise<void> => {
     try {
       const { agentName, agentType, agentPrimaryLanguage, businessId } = req.body;
-      const response = await this.agentService.createAgent(agentName, agentType, agentPrimaryLanguage, businessId)
+        const response = await this.agentService.createAgent(agentName, agentType, agentPrimaryLanguage, businessId)
 
       successResponse(201, "Agent created successfully", res, response)
     } catch (error: any) {
@@ -121,17 +122,46 @@ class AgentController implements IController {
 
       const twiml = new VoiceResponse();
 
-      let { bus_id, agnt_id }: any = req.query;
+      
+      let { th_id, bus_id, ass_id, agnt_id }: any = req.query;
 
       const updatedTwiml = await this.agentService.analyzeIntent(
         twiml,
+        th_id,
         bus_id,
+        ass_id,
         agnt_id,
         SpeechResult
       );
 
       res.type("text/xml");
       res.send(updatedTwiml.toString());
+    } catch (error: any) {
+      logger(error);
+      return next(new HttpException(400, error.message));
+    }
+  };
+
+  private callActionResponder = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const twiml = new VoiceResponse();
+
+      let { th_id, bus_id, ass_id, run_id, agnt_id }: any = req.query;
+      const updatedTwiml = await this.agentService.actionResponder(
+        twiml,
+        th_id,
+        bus_id,
+        ass_id,
+        run_id,
+        agnt_id
+      );
+
+      res.type("text/xml");
+      res.send(updatedTwiml?.toString());
     } catch (error: any) {
       logger(error);
       return next(new HttpException(400, error.message));

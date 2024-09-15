@@ -25,13 +25,13 @@ class App {
   }
 
   private initializeMiddlewares(): void {
-    // this.express.use(corsOption);
-    this.express.use(cors({
-      origin: 'http://localhost:3000',
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    }));
+    this.express.use(corsOption);
+    // this.express.use(cors({
+    //   origin: 'http://localhost:3000',
+    //   credentials: true,
+    //   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    //   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    // }));
     this.express.use(morgan("dev"));
     this.express.use((req, res, next) => {
       if (req.originalUrl === "/billing/payment/webhook") {

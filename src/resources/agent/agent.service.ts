@@ -115,8 +115,9 @@ Always! output the specified json format only, no further text is required!!!
 
   public async acceptCall(twiml: VoiceResponse, agentPhoneNumber: string) {
     try {
-      logger(agentPhoneNumber);
+      
 
+      
       const agent = await agentModel.findOne(
         {
           'agentPhoneNumbers.phoneNumber': agentPhoneNumber
@@ -133,12 +134,15 @@ Always! output the specified json format only, no further text is required!!!
         twiml.hangup();
       }
 
+
+      const thread = await this.openAiClient.beta.threads.create();
       twiml.say(
         `Hello, Welcome to ${business.name}. How may I be of service to you today?`
       );
 
+
       twiml.gather({
-        action: `/agent/call/analyze?bus_id=${business._id}&agnt_id=${agent._id}`,
+        action: `/agent/call/analyze?bus_id=${business._id}&th_id=${thread.id}&ass_id=${process.env.ASSISTANT_ID}&agnt_id=${agent._id}`,
         input: ["speech"],
         speechTimeout: "2",
         method: "post",
@@ -157,140 +161,104 @@ Always! output the specified json format only, no further text is required!!!
 
   public async analyzeIntent(
     twiml: VoiceResponse,
+    th_id: string,
     bus_id: string,
+    ass_id: string,
     agnt_id: string,
     speechResult: string,
     actionResult?: string
   ) {
     try {
-      const conversationId = randomUUID();
-
-      let response = await this.cohereClient.chat({
-        model: "command-r",
-        message: JSON.stringify({
+      await this.openAiClient.beta.threads.messages.create(th_id, {
+        role: "user",
+        content: JSON.stringify({
           businessId: bus_id,
           agentId: agnt_id,
           customerInput: speechResult,
           actionResult,
         }),
-        conversationId: conversationId,
-        tools: [
-          {
-            name: "getBusiness",
-            description:
-              "Retrieves information about a business, including the agent name, business name, allowed actions, website, country, primary language, support email etc",
-            parameterDefinitions: {
-              id: {
-                description:
-                  "the id of the business, it will always be passed to you with the input json that holds the users message",
-                type: "string",
-                required: true,
-              },
-              agentId: {
-                description: "The ID of the call agent",
-                type: "string",
-                required: true,
-              },
-            },
-          },
-          {
-            name: "getBusinessKnowledgeBase",
-            description: "Retrieves the parsed knowledge base of the business",
-            parameterDefinitions: {
-              id: {
-                description:
-                  "the id of the business, it will always be passed to you with the input json that holds the users message",
-                type: "string",
-                required: true,
-              },
-            },
-          },
-        ],
-        preamble: this.coherePreamble,
       });
 
-      logger(response)
+      let runObject = await this.openAiClient.beta.threads.runs.createAndPoll(
+        th_id,
+        {
+          assistant_id: ass_id,
+        }
+      );
 
-      const cohereToolCalls = response.toolCalls;
+      logger("run object in analyzer", runObject);
 
-      logger(cohereToolCalls);
+      const toolCalls =
+        runObject.required_action?.submit_tool_outputs.tool_calls;
 
-      if (cohereToolCalls) {
-        const outputs: any = await Promise.all(
-          cohereToolCalls.map(async (toolCall) => {
-            logger("Function called: ", toolCall.name);
-            logger("Function args ", toolCall.parameters);
+      if (toolCalls) {
+        const functionCallOutputs: any = await Promise.all(
+          toolCalls.map(async (toolCall) => {
+            // logger(toolCall);
+            logger("Function called: ", toolCall.function.name);
+            logger("Function args ", toolCall.function.arguments);
 
-            const args = toolCall.parameters;
+            const args = JSON.parse(toolCall.function.arguments);
 
-            if (toolCall.name == "getBusiness") {
+            if (toolCall.function.name == "getBusiness") {
               return {
-                outputs: await this.businessService.getBusinessAndAgent(
-                  args["id"] as string,
-                  args["agentId"] as string
+                output: JSON.stringify(
+                  await this.businessService.getBusinessAndAgent(
+                    args.id,
+                    args.agentId
+                  )
                 ),
-                call: toolCall,
+                tool_call_id: toolCall.id,
               };
-            } else if (toolCall.name == "getBusinessKnowledgeBase") {
+            } else if (toolCall.function.name == "getBusinessKnowledgeBase") {
               return {
-                outputs: await this.businessService.getBusinessKnowledgeBase(
-                  args["id"] as string
+                output: JSON.stringify(
+                  await this.businessService.getBusinessKnowledgeBase(args.id)
                 ),
-                call: toolCall,
+                tool_call_id: toolCall.id,
               };
             }
           })
         );
 
-        response = await this.cohereClient.chat({
-          model: "command-r",
-          message: "",
-          conversationId: conversationId,
-          tools: [
-            {
-              name: "getBusiness",
-              description:
-                "Retrieves information about a business, including the agent name, business name, allowed actions, website, country, primary language, support email etc",
-              parameterDefinitions: {
-                id: {
-                  description:
-                    "the id of the business, it will always be passed to you with the input json that holds the users message",
-                  type: "string",
-                  required: true,
-                },
-                agentId: {
-                  description: "The ID of the call agent",
-                  type: "string",
-                  required: true,
-                },
-              },
-            },
-            {
-              name: "getBusinessKnowledgeBase",
-              description:
-                "Retrieves the parsed knowledge base of the business",
-              parameterDefinitions: {
-                id: {
-                  description:
-                    "the id of the business, it will always be passed to you with the input json that holds the users message",
-                  type: "string",
-                  required: true,
-                },
-              },
-            },
-          ],
-          toolResults: outputs,
-          forceSingleStep: true,
-          preamble: this.coherePreamble,
-        });
-
+        runObject =
+          await this.openAiClient.beta.threads.runs.submitToolOutputsAndPoll(
+            th_id,
+            runObject.id,
+            { tool_outputs: functionCallOutputs }
+          );
       }
 
-      logger(response.text)
+      // logger(runObject)
+      while (true) {
+        if (runObject.completed_at != null) {
+          const message = (
+            await this.openAiClient.beta.threads.messages.list(th_id)
+          ).data;
 
-      const agentResponse = JSON.parse(response.text);
+          let lastMessage = message[0].content[0];
+          let messageText: any;
 
-      await this.actionHandler(agentResponse, twiml, bus_id, agnt_id, conversationId);
+          if (lastMessage.type == "text") {
+            messageText = lastMessage.text.value
+              .replace(/```json|```/g, "")
+              .trim();
+          }
+
+          const agentResponse = JSON.parse(messageText);
+
+          await this.actionHandler(
+            agentResponse,
+            twiml,
+            th_id,
+            bus_id,
+            ass_id,
+            agnt_id
+          );
+
+          break;
+        }
+      }
 
       return twiml;
     } catch (error: any) {
@@ -307,9 +275,10 @@ Always! output the specified json format only, no further text is required!!!
   private async actionHandler(
     agentResponse: IAgentResponse,
     twiml: VoiceResponse,
+    th_id: string,
     bus_id: string,
-    agnt_id: string,
-    convo_id: string
+    ass_id: string,
+    agnt_id: string
   ) {
     try {
       logger(agentResponse);
@@ -325,7 +294,7 @@ Always! output the specified json format only, no further text is required!!!
         twiml.say(agentResponse.responseMessage);
 
         twiml.gather({
-          action: `/agent/call/analyze?bus_id=${bus_id}&agnt_id=${agnt_id}&convo_id=${convo_id}`,
+          action: `/agent/call/analyze?bus_id=${bus_id}&th_id=${th_id}&ass_id=${process.env.ASSISTANT_ID}&agnt_id=${agnt_id}`,
           input: ["speech"],
           speechTimeout: "2",
           method: "post",
@@ -361,9 +330,9 @@ Always! output the specified json format only, no further text is required!!!
 
         const phoneNumber =
           business.humanOperatorPhoneNumbers[
-          Math.floor(
-            Math.random() * business.humanOperatorPhoneNumbers.length
-          )
+            Math.floor(
+              Math.random() * business.humanOperatorPhoneNumbers.length
+            )
           ];
 
         const dial = twiml.dial();
@@ -381,7 +350,7 @@ Always! output the specified json format only, no further text is required!!!
 
         if (!agent.allowedActions) throw new Error("Invalid action");
 
-        const actionResult = await axios({
+        const response = await axios({
           method: "POST",
           url: agent.agentWebhook,
           data: {
@@ -390,152 +359,82 @@ Always! output the specified json format only, no further text is required!!!
           },
         });
 
-        logger(actionResult.data);
+        logger(response.data);
 
         twiml.pause({
           length: 5,
         });
 
-        let response = await this.cohereClient.chat({
-          model: "command-r",
-          message: JSON.stringify({
-            businessId: bus_id,
-            agentId: agnt_id,
-            customerInput: "",
-            actionResult: actionResult.data,
-          }),
-          conversationId: convo_id,
-          tools: [
-            {
-              name: "getBusiness",
-              description:
-                "Retrieves information about a business, including the agent name, business name, allowed actions, website, country, primary language, support email etc",
-              parameterDefinitions: {
-                id: {
-                  description:
-                    "the id of the business, it will always be passed to you with the input json that holds the users message",
-                  type: "string",
-                  required: true,
-                },
-                agentId: {
-                  description: "The ID of the call agent",
-                  type: "string",
-                  required: true,
-                },
-              },
-            },
-            {
-              name: "getBusinessKnowledgeBase",
-              description: "Retrieves the parsed knowledge base of the business",
-              parameterDefinitions: {
-                id: {
-                  description:
-                    "the id of the business, it will always be passed to you with the input json that holds the users message",
-                  type: "string",
-                  required: true,
-                },
-              },
-            },
-          ],
-          preamble: this.coherePreamble,
-        });
+        const userMessage =
+          await this.openAiClient.beta.threads.messages.create(th_id, {
+            role: "user",
+            content: JSON.stringify({
+              businessId: bus_id,
+              customerInput: "",
+              actionResult: response.data,
+            }),
+          });
 
-        const cohereToolCalls = response.toolCalls;
+        logger("action result message ", userMessage);
 
-        logger(cohereToolCalls);
+        twiml.say("Please hold. I am confirming the status of your request.");
 
-        if (cohereToolCalls) {
-          const outputs: any = await Promise.all(
-            cohereToolCalls.map(async (toolCall) => {
-              logger("Function called: ", toolCall.name);
-              logger("Function args ", toolCall.parameters);
+        let runObject = await this.openAiClient.beta.threads.runs.createAndPoll(
+          th_id,
+          {
+            assistant_id: ass_id,
+          }
+        );
 
-              const args = toolCall.parameters;
+        logger("action result run ", runObject);
 
-              if (toolCall.name == "getBusiness") {
+        twiml.redirect(
+          `/agent/call/responder?bus_id=${bus_id}&th_id=${th_id}&ass_id=${process.env.ASSISTANT_ID}&run_id=${runObject.id}&agnt_id=${agnt_id}`
+        );
+
+        logger("After redirect!!!");
+        const toolCalls =
+          runObject.required_action?.submit_tool_outputs.tool_calls;
+
+        if (toolCalls) {
+          const functionCallOutputs: any = await Promise.all(
+            toolCalls.map(async (toolCall) => {
+              // logger(toolCall);
+              logger("Function called: ", toolCall.function.name);
+
+              const args = JSON.parse(toolCall.function.arguments);
+
+              if (toolCall.function.name == "getBusiness") {
                 return {
-                  outputs: await this.businessService.getBusinessAndAgent(
-                    args["id"] as string,
-                    args["agentId"] as string
+                  output: JSON.stringify(
+                    await this.businessService.getBusinessAndAgent(
+                      args.id,
+                      args.agentId
+                    )
                   ),
-                  call: toolCall,
+                  tool_call_id: toolCall.id,
                 };
-              } else if (toolCall.name == "getBusinessKnowledgeBase") {
+              } else if (toolCall.function.name == "getBusinessKnowledgeBase") {
                 return {
-                  outputs: await this.businessService.getBusinessKnowledgeBase(
-                    args["id"] as string
+                  output: JSON.stringify(
+                    await this.businessService.getBusinessKnowledgeBase(args.id)
                   ),
-                  call: toolCall,
+                  tool_call_id: toolCall.id,
                 };
               }
             })
           );
 
-          response = await this.cohereClient.chat({
-            model: "command-r",
-            message: "",
-            conversationId: convo_id,
-            tools: [
-              {
-                name: "getBusiness",
-                description:
-                  "Retrieves information about a business, including the agent name, business name, allowed actions, website, country, primary language, support email etc",
-                parameterDefinitions: {
-                  id: {
-                    description:
-                      "the id of the business, it will always be passed to you with the input json that holds the users message",
-                    type: "string",
-                    required: true,
-                  },
-                  agentId: {
-                    description: "The ID of the call agent",
-                    type: "string",
-                    required: true,
-                  },
-                },
-              },
-              {
-                name: "getBusinessKnowledgeBase",
-                description:
-                  "Retrieves the parsed knowledge base of the business",
-                parameterDefinitions: {
-                  id: {
-                    description:
-                      "the id of the business, it will always be passed to you with the input json that holds the users message",
-                    type: "string",
-                    required: true,
-                  },
-                },
-              },
-            ],
-            toolResults: outputs,
-            forceSingleStep: true,
-            preamble: this.coherePreamble,
-          });
+          runObject =
+            await this.openAiClient.beta.threads.runs.submitToolOutputsAndPoll(
+              th_id,
+              runObject.id,
+              { tool_outputs: functionCallOutputs }
+            );
+
+        
         }
-
-        const agentActionResponse = JSON.parse(response.text);
-
-        twiml.say(agentActionResponse.responseMessage);
-
-        twiml.gather({
-          action: `/agent/call/analyze?bus_id=${bus_id}&agnt_id=${agnt_id}&convo_id=${convo_id}`,
-          input: ["speech"],
-          speechTimeout: "2",
-          method: "post",
-          speechModel: "experimental_conversations",
-        });
       } else {
-        twiml.say("Sorry I was not able to understand your intent. Could you please let me know what you need ?")
-
-        twiml.gather({
-          action: `/agent/call/analyze?bus_id=${bus_id}&agnt_id=${agnt_id}&convo_id=${convo_id}`,
-          input: ["speech"],
-          speechTimeout: "2",
-          method: "post",
-          speechModel: "experimental_conversations",
-        });
-
         logger("agent response in else block", agentResponse);
       }
     } catch (error: any) {
@@ -546,6 +445,57 @@ Always! output the specified json format only, no further text is required!!!
       throw new Error(
         error.message || "An error has occurred. Please try again later."
       );
+    }
+  }
+  
+  public async actionResponder(
+    twiml: VoiceResponse,
+    th_id: string,
+    bus_id: string,
+    ass_id: string,
+    run_id: string,
+    agnt_id: string
+  ) {
+    try {
+      logger("inside action responder!!!");
+      const run = await this.openAiClient.beta.threads.runs.retrieve(
+        th_id,
+        run_id
+      );
+
+      while (true) {
+        if (run.completed_at != null) {
+          const message = (
+            await this.openAiClient.beta.threads.messages.list(th_id)
+          ).data;
+
+          let lastMessage = message[0].content[0];
+          let messageText: any;
+
+          if (lastMessage.type == "text") {
+            messageText = lastMessage.text.value
+              .replace(/```json|```/g, "")
+              .trim();
+          }
+
+          const agentResponse = JSON.parse(messageText);
+
+          twiml.say(agentResponse.responseMessage);
+
+          twiml.gather({
+            action: `/agent/call/analyze?bus_id=${bus_id}&th_id=${th_id}&ass_id=${process.env.ASSISTANT_ID}&agnt_id=${agnt_id}`,
+            input: ["speech"],
+            speechTimeout: "2",
+            method: "post",
+            speechModel: "experimental_conversations",
+          });
+
+          break;
+        }
+      }
+      return twiml;
+    } catch (error: any) {
+
     }
   }
 
