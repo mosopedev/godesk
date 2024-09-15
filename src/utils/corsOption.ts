@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 
 export const corsOption =  (req: Request, res: Response, next: NextFunction) => {
-  const allowedOrigins = ["*"];
+  const allowedOrigins = ["https://godesk-frontend.vercel.app", "https://localhost:3000"];
   const origin = req.headers.origin as string;
 
   if(allowedOrigins.includes(req.headers.origin)) {
