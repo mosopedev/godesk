@@ -125,6 +125,8 @@ Always! output the specified json format only, no further text is required!!!
 
       const business = await businessModel.findById(agent.businessId)
 
+      logger(business, agent)
+
 
       if (!agent || business) {
         twiml.say("Invalid Phone Number. No business with phone number found.");
