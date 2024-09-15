@@ -16,6 +16,7 @@ class AgentController implements IController {
   public readonly path = "/agent";
   public readonly router = Router();
   private readonly agentService = new AgentService();
+
   private readonly openAiClient = new OpenAI({
     organization: process.env.OPENAI_ORG_ID,
     project: process.env.OPENAI_PROJECT_ID,
@@ -34,12 +35,7 @@ class AgentController implements IController {
     this.router.post(`${this.path}/create`, authenticatedMiddleware, validationMiddleware(validation.createAgent), this.createAgent)
     this.router.post(`${this.path}/call/accept`, this.acceptPhoneCall);
     this.router.post(`${this.path}/call/analyze`, this.analyzeCallIntent);
-    this.router.post(`${this.path}/call/responder`, this.callActionResponder);
-    this.router.get(
-      `${this.path}/phones/:country`,
-      authenticatedMiddleware,
-      this.getAvailableNumbers
-    );
+    this.router.get( `${this.path}/phones/:country`, authenticatedMiddleware, this.getAvailableNumbers );
     this.router.post(
       `${this.path}/phones/buy`,
       validationMiddleware(validation.buyPhoneNumber),
@@ -84,12 +80,12 @@ class AgentController implements IController {
     next: NextFunction
   ): Promise<void> => {
     try {
-        const { agentName, agentType, agentPrimaryLanguage, businessId } = req.body;
-        const response = await this.agentService.createAgent(agentName, agentType, agentPrimaryLanguage, businessId)
+      const { agentName, agentType, agentPrimaryLanguage, businessId } = req.body;
+      const response = await this.agentService.createAgent(agentName, agentType, agentPrimaryLanguage, businessId)
 
-        successResponse(201, "Agent created successfully", res, response)
+      successResponse(201, "Agent created successfully", res, response)
     } catch (error: any) {
-        logger(error);
+      logger(error);
       return next(new HttpException(400, error.message));
     }
   }
@@ -102,9 +98,9 @@ class AgentController implements IController {
     try {
       const twiml = new VoiceResponse();
 
-      logger(req.body)
+      logger(req.body.Called)
 
-      const updatedTwiml = await this.agentService.acceptCall(twiml, req.body.to);
+      const updatedTwiml = await this.agentService.acceptCall(twiml, req.body.Called);
 
       res.type("text/xml");
       res.send(updatedTwiml.toString());
@@ -125,45 +121,17 @@ class AgentController implements IController {
 
       const twiml = new VoiceResponse();
 
-      let { th_id, bus_id, ass_id, agnt_id }: any = req.query;
+      let { bus_id, agnt_id }: any = req.query;
 
       const updatedTwiml = await this.agentService.analyzeIntent(
         twiml,
-        th_id,
         bus_id,
-        ass_id,
         agnt_id,
         SpeechResult
       );
 
       res.type("text/xml");
       res.send(updatedTwiml.toString());
-    } catch (error: any) {
-      logger(error);
-      return next(new HttpException(400, error.message));
-    }
-  };
-
-  private callActionResponder = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      const twiml = new VoiceResponse();
-
-      let { th_id, bus_id, ass_id, run_id, agnt_id }: any = req.query;
-      const updatedTwiml = await this.agentService.actionResponder(
-        twiml,
-        th_id,
-        bus_id,
-        ass_id,
-        run_id,
-        agnt_id
-      );
-
-      res.type("text/xml");
-      res.send(updatedTwiml?.toString());
     } catch (error: any) {
       logger(error);
       return next(new HttpException(400, error.message));
@@ -208,7 +176,7 @@ class AgentController implements IController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const { businessId, actionId, agentId} = req.body;
+      const { businessId, actionId, agentId } = req.body;
 
       await this.agentService.removeAction(businessId, actionId, agentId);
 

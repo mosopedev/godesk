@@ -11,6 +11,8 @@ import bcrypt from "bcrypt";
 import generateOtp from "@/utils/otp";
 import moment from "moment";
 import Stripe from "stripe";
+import IBusiness from "../business/business.interface";
+import businessModel from "../business/business.model";
 
 class AuthService {
   private readonly stripe = new Stripe(`${process.env.STRIPE_SECRET_KEY}`);
@@ -71,10 +73,10 @@ class AuthService {
           email,
           name: `${firstname} ${lastname}`,
         },
-        "Welcome to Chime Call ☎️",
+        "Welcome to Go Desk ☎️",
         {
           name: `${firstname} ${lastname}`,
-          product_name: "Chime Call",
+          product_name: "Go Desk",
           verification_code: otp,
         }
       );
@@ -105,6 +107,7 @@ class AuthService {
       photo?: string;
       isEmailVerified: boolean;
     };
+    business: IBusiness | null
   }> {
     try {
       const user: IUser | null = await userModel.findOne({
@@ -113,20 +116,22 @@ class AuthService {
 
       if (!user) throw new Error("Incorrect email or password");
 
-      const { firstname, lastname, isEmailVerified } = user;
+      const business = await businessModel.findOne(
+        {
+          admin: user.id
+        }
+      ).select("_id")
 
-      if (!user.isEmailVerified) throw new Error("Please verify your email.");
+      const { firstname, lastname, isEmailVerified } = user;
 
       if (!(await user.isValidPassword(password)))
         throw new Error("Incorrect email or password");
 
-      // End user's existing session, if any
       await authModel.deleteOne({ userId: user.id });
 
       const accessToken = await token.generateToken(user.id, true);
       const refreshToken = await token.generateToken(user.id, false);
 
-      // Log new user session
       const authSession: IAuth = await authModel.create({
         userId: user.id,
         refreshToken: refreshToken,
@@ -142,6 +147,7 @@ class AuthService {
           email,
           isEmailVerified,
         },
+        business,
       };
     } catch (error: any) {
       logger(error);
@@ -176,10 +182,10 @@ class AuthService {
           email,
           name: `${firstname} ${lastname}`,
         },
-        "Welcome to Chime Call ☎️",
+        "Welcome to Go Desk ☎️",
         {
           name: `${firstname} ${lastname}`,
-          product_name: "Chime Call",
+          product_name: "Go Desk",
           verification_code: otp,
         }
       );
@@ -192,12 +198,6 @@ class AuthService {
 
   private async validatePasswordPolicy(password: string): Promise<Boolean> {
     try {
-      /**
-       * Method to validate user password against password policy.
-       *
-       * Password Policy: Password must be minimum length of 8 and maximum of 64,
-       * password should contain atleast one valid special character, uppercase letter, lowercase letter and digit.
-       */
       const REQUIRED_CHARACTER_CLASSES = 4;
 
       const characterClasses: Record<string, RegExp> = {
@@ -252,73 +252,6 @@ class AuthService {
     }
   }
 
-  public async forgotPassword(email: string): Promise<void> {
-    try {
-      const otp = generateOtp(5);
-
-      const user: IUser | null = await userModel.findOneAndUpdate(
-        { email },
-        {
-          resetPasswordToken: {
-            token: otp,
-            expires: moment(new Date()).add(5, "m").toDate(),
-          },
-        }
-      );
-
-      if (!user)
-        throw new Error(
-          "Unable to send reset password mail. Account not found."
-        );
-
-      const { firstname, lastname } = user;
-
-      await sendMail(
-        "chime-reset-password",
-        {
-          email,
-          name: `${firstname} ${lastname}`,
-        },
-        "Reset your password",
-        {
-          name: `${firstname} ${lastname}`,
-          product_name: "Chime Call",
-          verification_code: otp,
-        }
-      );
-    } catch (error: any) {
-      throw new Error(
-        error || "Unable to send forgot password email. Please try again"
-      );
-    }
-  }
-
-  public async resetPassword(
-    email: string,
-    formToken: string,
-    password: string
-  ) {
-    try {
-      const user = await userModel.findOne({ email });
-
-      if (!user)
-        throw new Error("Unable to reset password. Account not found.");
-
-      const { token, expires } = user.resetPasswordToken;
-
-      if (Date.now() > new Date(expires).getTime() || token != formToken)
-        throw new Error("Invalid or expired token.");
-
-      await userModel.findOneAndUpdate(
-        {
-          email,
-        },
-        { password: await bcrypt.hash(password, 10) }
-      );
-    } catch (error: any) {
-      throw new Error(error || "Unable to reset password. Please try again");
-    }
-  }
 }
 
 export default AuthService;

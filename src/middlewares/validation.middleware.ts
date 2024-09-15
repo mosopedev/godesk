@@ -8,10 +8,11 @@ function validationMiddleware(schema: Joi.Schema): RequestHandler {
         const validationOptions = {
             abortEarly: false,
             allowUnknown: false,
-            stripUnkown: true
+            stripUnknown: true
         }
 
         try {
+            logger(req.body)
             const value = await schema.validateAsync(req.body, validationOptions)
             req.body = value
             next()

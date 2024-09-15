@@ -13,6 +13,7 @@ import { v4 as uuid } from "uuid";
 import { randomUUID } from "crypto";
 import { ObjectId } from "mongodb";
 import agentModel from "../agent/agent.model";
+import IAgent from "../agent/agent.interface";
 
 class BusinessService {
   private readonly twilioClient = twilio(
@@ -25,19 +26,19 @@ class BusinessService {
       const { name, email, website, country, humanOperatorPhoneNumbers } = data;
       const uniqueName = `${name}~${randomUUID()}`;
 
-      // const businessAccount = await this.twilioClient.api.accounts.create({
-      //     friendlyName: uniqueName,
-      // });
+      const businessAccount = await this.twilioClient.api.accounts.create({
+          friendlyName: uniqueName,
+      });
 
-      // const twilioAccount = {
-      //     sid: businessAccount.sid,
-      //     dateCreated: businessAccount.dateCreated,
-      //     dateUpdated: businessAccount.dateUpdated,
-      //     status: businessAccount.status,
-      //     authToken: businessAccount.authToken,
-      // };
+      const twilioAccount = {
+          sid: businessAccount.sid,
+          dateCreated: businessAccount.dateCreated,
+          dateUpdated: businessAccount.dateUpdated,
+          status: businessAccount.status,
+          authToken: businessAccount.authToken,
+      };
 
-      // logger(businessAccount);
+      logger(businessAccount);
 
       const business = await businessModel.create({
         name,
@@ -47,7 +48,7 @@ class BusinessService {
         country,
         admin: userId,
         humanOperatorPhoneNumbers,
-        // twilioAccount,
+        twilioAccount,
       });
 
       if (!business)
@@ -80,34 +81,18 @@ class BusinessService {
   public async getBusinessAndAgent(
     id: string,
     agentId: string
-  ): Promise<IBusiness | undefined> {
+  ): Promise<{agent: IAgent, business: IBusiness}> {
     try {
-      const businessInfo = await agentModel.aggregate([
-        {
-          $match: {
-            _id: new ObjectId(agentId),
-          },
-        },
-        {
-          $lookup: {
-            from: "Businesses",
-            localField: "businessId",
-            foreignField: "_id",
-            as: "businessDetails",
-          },
-        },
-        {
-          $project: {
-            "businessDetails.parsedKnowledgeBase": 0,
-          },
-        },
-      ]);
 
-      console.log(businessInfo);
+      const agent = await agentModel.findById(agentId);
+      const business = await businessModel.findById(id, { parsedKnowledgeBase: false})
 
-      if (!businessInfo) throw new Error("Business not found.");
+      if (!agent || !business) throw new Error("Business not found.");
 
-      return businessInfo[0];
+      return {
+        agent,
+        business
+      };
     } catch (error: any) {
       throw new Error(
         error || "Failed to retrieve business. Please try again."

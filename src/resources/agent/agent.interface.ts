@@ -14,8 +14,6 @@ export default interface IAgent {
   agentWebhook: string;
   agentPrimaryLanguage: string;
   businessId: string;
-  agentApiKey: string;
-  agentApiKeySample: string;
   allowedActions?: Array<{
     action: string;
     method: string;

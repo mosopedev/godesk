@@ -14,9 +14,9 @@ async function authenticatedMiddleware(
 ): Promise<Response | void> {
     const bearer = req.headers.authorization
     const refreshToken = req.cookies?.refreshToken
-    
 
-    if (!bearer || !bearer.startsWith('Bearer ') || !refreshToken) {
+    
+    if (!bearer || !bearer.startsWith('Bearer ')) {
         logger('Unauthorized - Auth token required')
         return next(new HttpException(401, 'Session expired. Login to continue'))
     }
@@ -27,53 +27,56 @@ async function authenticatedMiddleware(
         const payload: Token | jwt.JwtPayload | jwt.JsonWebTokenError = await token.verifyToken(accessToken, true)
         const refreshTokenPayload: jwt.JwtPayload | jwt.JsonWebTokenError = await token.verifyToken(refreshToken, false)
 
-        // both refresh and access token are expired. login required
-        if (payload instanceof jwt.JsonWebTokenError && refreshTokenPayload instanceof jwt.JsonWebTokenError) {
-            logger('Both tokens expired')
-            return next(new HttpException(401, 'Session has expired. Please login to continue.'))
-        }
+        // // both refresh and access token are expired. login required
+        // if (payload instanceof jwt.JsonWebTokenError && refreshTokenPayload instanceof jwt.JsonWebTokenError) {
+        //     logger('Both tokens expired')
+        //     return next(new HttpException(401, 'Session has expired. Please login to continue.'))
+        // }
 
-        if (!(payload instanceof jwt.JsonWebTokenError) && refreshTokenPayload instanceof jwt.JsonWebTokenError) {
+        if (payload instanceof jwt.JsonWebTokenError) {
             logger('Refresh token expired')
             return next(new HttpException(401, 'Session has expired. Please login to continue.'))
         }
 
+        req.user = payload.id
+        return next()
+
         // Access token expired but Refresh token valid
-        if(payload instanceof jwt.JsonWebTokenError && !(refreshTokenPayload instanceof jwt.JsonWebTokenError)) {
-            //  find and delete recent refreshToken
-            const currentSession: IAuth | null = await authModel.findOne({userId: refreshTokenPayload.id})
+        // if(payload instanceof jwt.JsonWebTokenError && !(refreshTokenPayload instanceof jwt.JsonWebTokenError)) {
+        //     //  find and delete recent refreshToken
+        //     const currentSession: IAuth | null = await authModel.findOne({userId: refreshTokenPayload.id})
 
-            if(!currentSession){
-                logger("No currentSession. 30days have passed.")
-                return next(new HttpException(401, 'Session has expired. Please login to continue'))
-            } 
+        //     if(!currentSession){
+        //         logger("No currentSession. 30days have passed.")
+        //         return next(new HttpException(401, 'Session has expired. Please login to continue'))
+        //     } 
             
-            if(currentSession.refreshToken !== refreshToken) {
-                logger('Unauthorized - refresh tokens do not match')
-                return next(new HttpException(401, 'Session has expired. Please login to continue.'))
-            }
+        //     if(currentSession.refreshToken !== refreshToken) {
+        //         logger('Unauthorized - refresh tokens do not match')
+        //         return next(new HttpException(401, 'Session has expired. Please login to continue.'))
+        //     }
 
-            logger('generated new access token')
-            const accessToken = await token.generateToken(refreshTokenPayload.id, true)
+        //     logger('generated new access token')
+        //     const accessToken = await token.generateToken(refreshTokenPayload.id, true)
             
-            req.user = refreshTokenPayload.id
+        //     req.user = refreshTokenPayload.id
 
-            res.setHeader('Authorization', `Bearer ${accessToken}`);
-            return next()      
-        }
+        //     res.setHeader('Authorization', `Bearer ${accessToken}`);
+        //     return next()      
+        // }
 
-        if (!(payload instanceof jwt.JsonWebTokenError) && !(refreshTokenPayload instanceof jwt.JsonWebTokenError)) {
+        // if (!(payload instanceof jwt.JsonWebTokenError) && !(refreshTokenPayload instanceof jwt.JsonWebTokenError)) {
             
-            const currentSession: IAuth | null = await authModel.findOne({userId: refreshTokenPayload.id})
+        //     const currentSession: IAuth | null = await authModel.findOne({userId: refreshTokenPayload.id})
             
-            if(!currentSession){
-                logger("No currentSession. 30days have passed.")
-                return next(new HttpException(401, 'Session has expired. Please login to continue'))
-            } 
+        //     if(!currentSession){
+        //         logger("No currentSession. 30days have passed.")
+        //         return next(new HttpException(401, 'Session has expired. Please login to continue'))
+        //     } 
 
-            req.user = payload.id
-            return next()
-        }
+        //     req.user = payload.id
+        //     return next()
+        // }
 
     } catch (error: any) {
         logger(error)

@@ -9,6 +9,7 @@ import corsOption from "./utils/corsOption";
 import IController from "./interfaces/controller.interface";
 import ErrorMiddleware from "./middlewares/error.middleware";
 import logger from "./utils/logger";
+import cors from 'cors';
 
 class App {
   public express: Application;
@@ -24,11 +25,23 @@ class App {
   }
 
   private initializeMiddlewares(): void {
-    this.express.use(corsOption);
+    // this.express.use(corsOption);
+    this.express.use(cors({
+      origin: 'http://localhost:3000',
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    }));
     this.express.use(morgan("dev"));
-    this.express.use(express.json());
+    this.express.use((req, res, next) => {
+      if (req.originalUrl === "/billing/payment/webhook") {
+        express.raw({ type: "application/json" })(req, res, next);
+      } else {
+        express.json()(req, res, next);
+      }
+    });
     this.express.use(express.urlencoded({ extended: false }));
-    this.express.use(ExpressMongoSanitize())
+    // this.express.use(ExpressMongoSanitize())
     this.express.use(cookieParser());
   }
 
