@@ -117,46 +117,26 @@ Always! output the specified json format only, no further text is required!!!
     try {
       logger(agentPhoneNumber);
 
-      const agentAndBusiness = await agentModel.aggregate([
+      const agent = await agentModel.findOne(
         {
-          $match: {
-            agentPhoneNumbers: {
-              $elemMatch: {
-                phoneNumber: agentPhoneNumber,
-              },
-            },
-          },
-        },
-        {
-          $lookup: {
-            from: "Businesses",
-            localField: "businessId",
-            foreignField: "_id",
-            as: "business",
-          },
-        },
-        {
-          $project: {
-            "business._id": 1,
-            "business.name": 1,
-            _id: 1,
-          },
-        },
-      ]);
+          'agentPhoneNumbers.phoneNumber': agentPhoneNumber
+        }
+      );
 
-      logger(agentAndBusiness);
+      const business = await businessModel.findById(agent.businessId)
 
-      if (!agentAndBusiness) {
+
+      if (!agent || business) {
         twiml.say("Invalid Phone Number. No business with phone number found.");
         twiml.hangup();
       }
 
       twiml.say(
-        `Hello, Welcome to ${agentAndBusiness[0].name}. How may I be of service to you today?`
+        `Hello, Welcome to ${business.name}. How may I be of service to you today?`
       );
 
       twiml.gather({
-        action: `/agent/call/analyze?bus_id=${agentAndBusiness[0].business._id}&agnt_id=${agentAndBusiness[0]._id}`,
+        action: `/agent/call/analyze?bus_id=${business._id}&agnt_id=${agent._id}`,
         input: ["speech"],
         speechTimeout: "2",
         method: "post",
@@ -407,9 +387,9 @@ Always! output the specified json format only, no further text is required!!!
 
         logger(actionResult.data);
 
-        // twiml.pause({
-        //   length: 5,
-        // });
+        twiml.pause({
+          length: 5,
+        });
 
         let response = await this.cohereClient.chat({
           model: "command-r",
@@ -542,7 +522,7 @@ Always! output the specified json format only, no further text is required!!!
         });
       } else {
         twiml.say("Sorry I was not able to understand your intent. Could you please let me know what you need ?")
-        
+
         twiml.gather({
           action: `/agent/call/analyze?bus_id=${bus_id}&agnt_id=${agnt_id}&convo_id=${convo_id}`,
           input: ["speech"],
