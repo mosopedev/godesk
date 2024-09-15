@@ -209,12 +209,13 @@ Always! output the specified json format only, no further text is required!!!
         preamble: this.coherePreamble,
       });
 
+      logger(response)
+
       const cohereToolCalls = response.toolCalls;
 
       logger(cohereToolCalls);
 
       if (cohereToolCalls) {
-
         const outputs: any = await Promise.all(
           cohereToolCalls.map(async (toolCall) => {
             logger("Function called: ", toolCall.name);
@@ -284,6 +285,8 @@ Always! output the specified json format only, no further text is required!!!
         });
 
       }
+
+      logger(response.text)
 
       const agentResponse = JSON.parse(response.text);
 
